@@ -12,7 +12,7 @@ declare global {
   }
 }
 
-export function authenticate(req: Request, res: Response, next: NextFunction) {
+export function authenticate(req: Request, _res: Response, next: NextFunction): void {
   try {
     const token = extractTokenFromHeader(req.headers.authorization);
 
@@ -44,7 +44,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
 }
 
 export function authorize(...roles: string[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req: Request, _res: Response, next: NextFunction): void => {
     try {
       if (!req.auth) {
         throw new AuthenticationError('Authentication required');

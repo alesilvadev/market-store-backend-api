@@ -8,18 +8,19 @@ import { authenticate, authorize, getAuthContext } from '../middleware/auth.js';
 
 export const authRouter = Router();
 
-authRouter.post('/login', async (req: Request, res: Response, next: NextFunction) => {
+authRouter.post('/login', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const result = loginSchema.safeParse(req.body);
 
     if (!result.success) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: {
           message: 'Validation error',
           details: result.error.flatten(),
         },
       } as ApiResponse<null>);
+      return;
     }
 
     const { email, password } = result.data;
@@ -27,26 +28,28 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
     const user = userService.getUserByEmail(email);
 
     if (!user || !user.passwordHash) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: { message: 'Invalid email or password' },
       } as ApiResponse<null>);
+      return;
     }
 
     const isPasswordValid = await userService.verifyUserPassword(user, password);
 
     if (!isPasswordValid) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: { message: 'Invalid email or password' },
       } as ApiResponse<null>);
+      return;
     }
 
     const token = generateToken(user);
 
     logger.info('User logged in', { userId: user.id, email: user.email });
 
-    return res.json({
+    res.json({
       success: true,
       data: {
         user: {
@@ -67,26 +70,27 @@ authRouter.post(
   '/register',
   authenticate,
   authorize('ADMIN'),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const result = createUserSchema.safeParse(req.body);
 
       if (!result.success) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
         } as ApiResponse<null>);
+        return;
       }
 
       const auth = getAuthContext(req);
-      const user = userService.createUser(result.data, auth.user.id);
+      const user = await userService.createUser(result.data);
 
       logger.info('User created', { userId: user.id, email: user.email, createdBy: auth.user.id });
 
-      return res.status(201).json({
+      res.status(201).json({
         success: true,
         data: {
           user: {
@@ -103,10 +107,10 @@ authRouter.post(
   }
 );
 
-authRouter.get('/me', authenticate, (req: Request, res: Response) => {
+authRouter.get('/me', authenticate, (req: Request, res: Response): void => {
   const auth = getAuthContext(req);
 
-  return res.json({
+  res.json({
     success: true,
     data: {
       user: {

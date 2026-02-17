@@ -7,8 +7,8 @@ export function errorHandlerMiddleware(
   err: Error,
   req: Request,
   res: Response,
-  next: NextFunction
-) {
+  _next: NextFunction
+): void {
   logger.error('Request error', err, {
     path: req.path,
     method: req.method,
@@ -26,7 +26,8 @@ export function errorHandlerMiddleware(
       error: errorObj,
     };
 
-    return res.status(err.statusCode).json(response);
+    res.status(err.statusCode).json(response);
+    return;
   }
 
   const response: ApiResponse<null> = {
@@ -36,7 +37,7 @@ export function errorHandlerMiddleware(
     },
   };
 
-  return res.status(500).json(response);
+  res.status(500).json(response);
 }
 
 export function handleValidationError(errors: any) {

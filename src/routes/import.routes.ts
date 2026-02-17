@@ -18,13 +18,14 @@ importRouter.post(
   authenticate,
   authorize(UserRole.ADMIN),
   upload.single('file'),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       if (!req.file) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: { message: 'File is required' },
         } as ApiResponse<null>);
+        return;
       }
 
       const text = req.file.buffer.toString('utf-8');
@@ -121,7 +122,7 @@ importRouter.post(
         },
       };
 
-      return res.json(response);
+      res.json(response);
     } catch (error) {
       next(error);
     }

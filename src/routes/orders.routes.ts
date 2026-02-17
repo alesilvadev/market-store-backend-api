@@ -6,25 +6,25 @@ import {
   orderFilterSchema,
 } from '../schemas/index.js';
 import { orderService } from '../services/order.service.js';
-import { ApiError } from '../utils/errors.js';
 import { ApiResponse } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { authenticate, getAuthContext } from '../middleware/auth.js';
 
 export const ordersRouter = Router();
 
-ordersRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
+ordersRouter.post('/', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const result = createOrderSchema.safeParse(req.body);
 
     if (!result.success) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: {
           message: 'Validation error',
           details: result.error.flatten(),
         },
       } as ApiResponse<null>);
+      return;
     }
 
     const order = orderService.createOrder(result.data);
@@ -36,23 +36,24 @@ ordersRouter.post('/', async (req: Request, res: Response, next: NextFunction) =
       data: order,
     };
 
-    return res.status(201).json(response);
+    res.status(201).json(response);
   } catch (error) {
     next(error);
   }
 });
 
-ordersRouter.get('/code/:code', async (req: Request, res: Response, next: NextFunction) => {
+ordersRouter.get('/code/:code', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const code = req.params.code;
 
     const order = orderService.getOrderByCode(code);
 
     if (!order) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         error: { message: 'Order not found' },
       } as ApiResponse<null>);
+      return;
     }
 
     const response: ApiResponse<any> = {
@@ -60,23 +61,24 @@ ordersRouter.get('/code/:code', async (req: Request, res: Response, next: NextFu
       data: order,
     };
 
-    return res.json(response);
+    res.json(response);
   } catch (error) {
     next(error);
   }
 });
 
-ordersRouter.get('/:id', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+ordersRouter.get('/:id', authenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const id = req.params.id;
 
     const order = orderService.getOrderById(id);
 
     if (!order) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         error: { message: 'Order not found' },
       } as ApiResponse<null>);
+      return;
     }
 
     const response: ApiResponse<any> = {
@@ -84,24 +86,25 @@ ordersRouter.get('/:id', authenticate, async (req: Request, res: Response, next:
       data: order,
     };
 
-    return res.json(response);
+    res.json(response);
   } catch (error) {
     next(error);
   }
 });
 
-ordersRouter.get('/', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+ordersRouter.get('/', authenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const result = orderFilterSchema.safeParse(req.query);
 
     if (!result.success) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: {
           message: 'Validation error',
           details: result.error.flatten(),
         },
       } as ApiResponse<null>);
+      return;
     }
 
     const { page, limit, status, startDate, endDate } = result.data;
@@ -119,7 +122,7 @@ ordersRouter.get('/', authenticate, async (req: Request, res: Response, next: Ne
       },
     };
 
-    return res.json(response);
+    res.json(response);
   } catch (error) {
     next(error);
   }
@@ -128,19 +131,20 @@ ordersRouter.get('/', authenticate, async (req: Request, res: Response, next: Ne
 ordersRouter.post(
   '/:id/complete',
   authenticate,
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = req.params.id;
       const result = completeOrderSchema.safeParse(req.body);
 
       if (!result.success) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
         } as ApiResponse<null>);
+        return;
       }
 
       const auth = getAuthContext(req);
@@ -160,7 +164,7 @@ ordersRouter.post(
         data: order,
       };
 
-      return res.json(response);
+      res.json(response);
     } catch (error) {
       next(error);
     }
@@ -170,19 +174,20 @@ ordersRouter.post(
 ordersRouter.patch(
   '/:id/status',
   authenticate,
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = req.params.id;
       const result = updateOrderStatusSchema.safeParse(req.body);
 
       if (!result.success) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
         } as ApiResponse<null>);
+        return;
       }
 
       const order = orderService.updateOrderStatus(id, result.data);
@@ -194,7 +199,7 @@ ordersRouter.patch(
         data: order,
       };
 
-      return res.json(response);
+      res.json(response);
     } catch (error) {
       next(error);
     }

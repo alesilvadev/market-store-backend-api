@@ -1,10 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { userService } from '../services/user.service.js';
 import { createUserSchema, updateUserSchema, paginationSchema } from '../schemas/index.js';
-import { ApiError } from '../utils/errors.js';
 import { ApiResponse } from '../types/index.js';
 import { logger } from '../utils/logger.js';
-import { authenticate, authorize } from '../middleware/auth.js';
+import { authenticate, authorize, getAuthContext } from '../middleware/auth.js';
 import { UserRole } from '../types/index.js';
 
 export const usersRouter = Router();
@@ -13,18 +12,19 @@ usersRouter.get(
   '/',
   authenticate,
   authorize(UserRole.ADMIN),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const result = paginationSchema.safeParse(req.query);
 
       if (!result.success) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
         } as ApiResponse<null>);
+        return;
       }
 
       const { page, limit } = result.data;
@@ -42,7 +42,7 @@ usersRouter.get(
         },
       };
 
-      return res.json(response);
+      res.json(response);
     } catch (error) {
       next(error);
     }
@@ -53,16 +53,17 @@ usersRouter.get(
   '/:id',
   authenticate,
   authorize(UserRole.ADMIN),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = req.params.id;
       const user = userService.getUserById(id);
 
       if (!user) {
-        return res.status(404).json({
+        res.status(404).json({
           success: false,
           error: { message: 'User not found' },
         } as ApiResponse<null>);
+        return;
       }
 
       const response: ApiResponse<any> = {
@@ -70,7 +71,7 @@ usersRouter.get(
         data: user,
       };
 
-      return res.json(response);
+      res.json(response);
     } catch (error) {
       next(error);
     }
@@ -81,31 +82,32 @@ usersRouter.post(
   '/',
   authenticate,
   authorize(UserRole.ADMIN),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const result = createUserSchema.safeParse(req.body);
 
       if (!result.success) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
         } as ApiResponse<null>);
+        return;
       }
 
-      const auth = authenticate as any;
-      const user = userService.createUser(result.data, auth?.user?.id);
+      const auth = getAuthContext(req);
+      const user = await userService.createUser(result.data);
 
-      logger.info('User created', { userId: user.id, email: user.email });
+      logger.info('User created', { userId: user.id, email: user.email, createdBy: auth.user.id });
 
       const response: ApiResponse<any> = {
         success: true,
         data: user,
       };
 
-      return res.status(201).json(response);
+      res.status(201).json(response);
     } catch (error) {
       next(error);
     }
@@ -116,19 +118,20 @@ usersRouter.put(
   '/:id',
   authenticate,
   authorize(UserRole.ADMIN),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = req.params.id;
       const result = updateUserSchema.safeParse(req.body);
 
       if (!result.success) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
         } as ApiResponse<null>);
+        return;
       }
 
       const user = userService.updateUser(id, result.data);
@@ -140,7 +143,7 @@ usersRouter.put(
         data: user,
       };
 
-      return res.json(response);
+      res.json(response);
     } catch (error) {
       next(error);
     }
@@ -151,7 +154,7 @@ usersRouter.delete(
   '/:id',
   authenticate,
   authorize(UserRole.ADMIN),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = req.params.id;
       userService.deleteUser(id);
@@ -162,7 +165,7 @@ usersRouter.delete(
         success: true,
       };
 
-      return res.json(response);
+      res.json(response);
     } catch (error) {
       next(error);
     }

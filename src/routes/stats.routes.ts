@@ -1,12 +1,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { orderService } from '../services/order.service.js';
 import { ApiResponse } from '../types/index.js';
-import { logger } from '../utils/logger.js';
 import { authenticate } from '../middleware/auth.js';
 
 export const statsRouter = Router();
 
-statsRouter.get('/orders', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+statsRouter.get('/orders', authenticate, async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const stats = orderService.getOrderStats();
 
@@ -15,7 +14,7 @@ statsRouter.get('/orders', authenticate, async (req: Request, res: Response, nex
       data: stats,
     };
 
-    return res.json(response);
+    res.json(response);
   } catch (error) {
     next(error);
   }
@@ -24,15 +23,16 @@ statsRouter.get('/orders', authenticate, async (req: Request, res: Response, nex
 statsRouter.get(
   '/top-products',
   authenticate,
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const limit = parseInt(req.query.limit as string) || 10;
 
       if (isNaN(limit) || limit < 1 || limit > 100) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           error: { message: 'Invalid limit parameter' },
         } as ApiResponse<null>);
+        return;
       }
 
       const products = orderService.getTopProducts(limit);
@@ -42,7 +42,7 @@ statsRouter.get(
         data: products,
       };
 
-      return res.json(response);
+      res.json(response);
     } catch (error) {
       next(error);
     }
