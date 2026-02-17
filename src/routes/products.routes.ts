@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Router, Request, Response, NextFunction } from 'express';
 import { productService } from '../services/product.service.js';
 import { createProductSchema, updateProductSchema, paginationSchema } from '../schemas/index.js';
 import { ApiError } from '../utils/errors.js';
@@ -7,25 +7,20 @@ import { logger } from '../utils/logger.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { UserRole } from '../types/index.js';
 
-const router = new Hono();
+export const productsRouter = Router();
 
-// Get all products (public endpoint)
-router.get('/', async (c) => {
+productsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const query = c.req.query();
-    const result = paginationSchema.safeParse(query);
+    const result = paginationSchema.safeParse(req.query);
 
     if (!result.success) {
-      return c.json(
-        {
-          success: false,
-          error: {
-            message: 'Validation error',
-            details: result.error.flatten(),
-          },
-        } as ApiResponse<null>,
-        400,
-      );
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Validation error',
+          details: result.error.flatten(),
+        },
+      } as ApiResponse<null>);
     }
 
     const { page, limit } = result.data;
@@ -43,32 +38,21 @@ router.get('/', async (c) => {
       },
     };
 
-    return c.json(response, 200);
+    return res.json(response);
   } catch (error) {
-    logger.error('List products error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// Search products by SKU (public endpoint)
-router.get('/search', async (c) => {
+productsRouter.get('/search', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sku = c.req.query('sku');
+    const sku = req.query.sku as string;
 
     if (!sku) {
-      return c.json(
-        {
-          success: false,
-          error: { message: 'SKU parameter is required' },
-        } as ApiResponse<null>,
-        400,
-      );
+      return res.status(400).json({
+        success: false,
+        error: { message: 'SKU parameter is required' },
+      } as ApiResponse<null>);
     }
 
     const products = productService.searchProductsBySku(sku);
@@ -78,33 +62,22 @@ router.get('/search', async (c) => {
       data: products,
     };
 
-    return c.json(response, 200);
+    return res.json(response);
   } catch (error) {
-    logger.error('Search products error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// Get product by ID
-router.get('/:id', async (c) => {
+productsRouter.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = c.req.param('id');
+    const id = req.params.id;
     const product = productService.getProductById(id);
 
     if (!product) {
-      return c.json(
-        {
-          success: false,
-          error: { message: 'Product not found' },
-        } as ApiResponse<null>,
-        404,
-      );
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Product not found' },
+      } as ApiResponse<null>);
     }
 
     const response: ApiResponse<any> = {
@@ -112,155 +85,99 @@ router.get('/:id', async (c) => {
       data: product,
     };
 
-    return c.json(response, 200);
+    return res.json(response);
   } catch (error) {
-    logger.error('Get product error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// Create product (admin only)
-router.post('/', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const body = await c.req.json();
-    const result = createProductSchema.safeParse(body);
+productsRouter.post(
+  '/',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = createProductSchema.safeParse(req.body);
 
-    if (!result.success) {
-      return c.json(
-        {
+      if (!result.success) {
+        return res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const product = productService.createProduct(result.data);
+
+      logger.info('Product created', { productId: product.id, sku: product.sku });
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: product,
+      };
+
+      return res.status(201).json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const product = productService.createProduct(result.data);
-
-    logger.info('Product created', { productId: product.id, sku: product.sku });
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: product,
-    };
-
-    return c.json(response, 201);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message, details: error.details },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Create product error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
+);
 
-// Update product (admin only)
-router.put('/:id', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-    const result = updateProductSchema.safeParse(body);
+productsRouter.put(
+  '/:id',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id;
+      const result = updateProductSchema.safeParse(req.body);
 
-    if (!result.success) {
-      return c.json(
-        {
+      if (!result.success) {
+        return res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const product = productService.updateProduct(id, result.data);
+
+      logger.info('Product updated', { productId: id });
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: product,
+      };
+
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const product = productService.updateProduct(id, result.data);
-
-    logger.info('Product updated', { productId: id });
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: product,
-    };
-
-    return c.json(response, 200);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message, details: error.details },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Update product error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
+);
 
-// Delete product (admin only)
-router.delete('/:id', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const id = c.req.param('id');
-    productService.deleteProduct(id);
+productsRouter.delete(
+  '/:id',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id;
+      productService.deleteProduct(id);
 
-    logger.info('Product deleted', { productId: id });
+      logger.info('Product deleted', { productId: id });
 
-    const response: ApiResponse<null> = {
-      success: true,
-    };
+      const response: ApiResponse<null> = {
+        success: true,
+      };
 
-    return c.json(response, 200);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    logger.error('Delete product error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
-
-export { router as productsRouter };
+);

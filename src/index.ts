@@ -1,5 +1,6 @@
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
+import express from 'express';
+import cors from 'cors';
+import { onRequest } from 'firebase-functions/v2/https';
 import { initializeDatabase, closeDatabase } from './db/init.js';
 import { authRouter } from './routes/auth.routes.js';
 import { productsRouter } from './routes/products.routes.js';
@@ -7,13 +8,11 @@ import { ordersRouter } from './routes/orders.routes.js';
 import { usersRouter } from './routes/users.routes.js';
 import { importRouter } from './routes/import.routes.js';
 import { statsRouter } from './routes/stats.routes.js';
-import { errorHandler } from './middleware/error.js';
+import { errorHandlerMiddleware } from './middleware/error.js';
 import { logger } from './utils/logger.js';
-import { ApiResponse } from './types/index.js';
 
-const app = new Hono();
+const app = express();
 
-// Initialize database
 try {
   initializeDatabase();
   logger.info('Database initialized successfully');
@@ -22,61 +21,48 @@ try {
   process.exit(1);
 }
 
-// CORS configuration
-const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3001,http://localhost:3002').split(
-  ',',
-);
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3001,http://localhost:3002').split(',');
 
 app.use(
-  '*',
   cors({
     origin: corsOrigins,
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
-  }),
+  })
 );
 
-// Health check endpoint
-app.get('/api/health', (c) => {
-  const response: ApiResponse<{ status: string; timestamp: string }> = {
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.get('/api/health', (_req: express.Request, res: express.Response): void => {
+  res.json({
     success: true,
     data: {
       status: 'ok',
       timestamp: new Date().toISOString(),
     },
-  };
-
-  return c.json(response, 200);
+  });
 });
 
-// API Routes
-app.route('/api/auth', authRouter);
-app.route('/api/products', productsRouter);
-app.route('/api/orders', ordersRouter);
-app.route('/api/users', usersRouter);
-app.route('/api/import', importRouter);
-app.route('/api/stats', statsRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/products', productsRouter);
+app.use('/api/orders', ordersRouter);
+app.use('/api/users', usersRouter);
+app.use('/api/import', importRouter);
+app.use('/api/stats', statsRouter);
 
-// 404 handler
-app.notFound((c) => {
-  const response: ApiResponse<null> = {
+app.use((_req: express.Request, res: express.Response): void => {
+  res.status(404).json({
     success: false,
     error: {
       message: 'Endpoint not found',
     },
-  };
-
-  return c.json(response, 404);
+  });
 });
 
-// Error handler
-app.onError((err, c) => {
-  logger.error('Unhandled error', err);
-  return errorHandler(err, c);
-});
+app.use(errorHandlerMiddleware);
 
-// Graceful shutdown
 process.on('SIGINT', () => {
   logger.info('Shutting down gracefully...');
   closeDatabase();
@@ -89,12 +75,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+export const api = onRequest(app);
+
 const PORT = parseInt(process.env.PORT || '3000', 10);
-
-// Start server
-export default {
-  port: PORT,
-  fetch: app.fetch,
-};
-
-logger.info(`Market Store API starting on port ${PORT}`);
+logger.info(`Market Store API ready on port ${PORT}`);

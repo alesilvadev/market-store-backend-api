@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Router, Request, Response, NextFunction } from 'express';
 import { userService } from '../services/user.service.js';
 import { createUserSchema, updateUserSchema, paginationSchema } from '../schemas/index.js';
 import { ApiError } from '../utils/errors.js';
@@ -7,225 +7,164 @@ import { logger } from '../utils/logger.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { UserRole } from '../types/index.js';
 
-const router = new Hono();
+export const usersRouter = Router();
 
-// List users (admin only)
-router.get('/', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const query = c.req.query();
-    const result = paginationSchema.safeParse(query);
+usersRouter.get(
+  '/',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = paginationSchema.safeParse(req.query);
 
-    if (!result.success) {
-      return c.json(
-        {
+      if (!result.success) {
+        return res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const { page, limit } = result.data;
+      const offset = (page - 1) * limit;
+
+      const { users, total } = userService.listUsers(limit, offset);
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: users,
+        meta: {
+          page,
+          limit,
+          total,
+        },
+      };
+
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const { page, limit } = result.data;
-    const offset = (page - 1) * limit;
-
-    const { users, total } = userService.listUsers(limit, offset);
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: users,
-      meta: {
-        page,
-        limit,
-        total,
-      },
-    };
-
-    return c.json(response, 200);
-  } catch (error) {
-    logger.error('List users error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
+);
 
-// Get user by ID (admin only)
-router.get('/:id', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const id = c.req.param('id');
-    const user = userService.getUserById(id);
+usersRouter.get(
+  '/:id',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id;
+      const user = userService.getUserById(id);
 
-    if (!user) {
-      return c.json(
-        {
+      if (!user) {
+        return res.status(404).json({
           success: false,
           error: { message: 'User not found' },
-        } as ApiResponse<null>,
-        404,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: user,
+      };
+
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: user,
-    };
-
-    return c.json(response, 200);
-  } catch (error) {
-    logger.error('Get user error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
+);
 
-// Create user (admin only)
-router.post('/', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const body = await c.req.json();
-    const result = createUserSchema.safeParse(body);
+usersRouter.post(
+  '/',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = createUserSchema.safeParse(req.body);
 
-    if (!result.success) {
-      return c.json(
-        {
+      if (!result.success) {
+        return res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const auth = authenticate as any;
+      const user = userService.createUser(result.data, auth?.user?.id);
+
+      logger.info('User created', { userId: user.id, email: user.email });
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: user,
+      };
+
+      return res.status(201).json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const user = await userService.createUser(result.data);
-
-    logger.info('User created', { userId: user.id, email: user.email });
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: user,
-    };
-
-    return c.json(response, 201);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message, details: error.details },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Create user error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
+);
 
-// Update user (admin only)
-router.put('/:id', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-    const result = updateUserSchema.safeParse(body);
+usersRouter.put(
+  '/:id',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id;
+      const result = updateUserSchema.safeParse(req.body);
 
-    if (!result.success) {
-      return c.json(
-        {
+      if (!result.success) {
+        return res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const user = userService.updateUser(id, result.data);
+
+      logger.info('User updated', { userId: id });
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: user,
+      };
+
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const user = userService.updateUser(id, result.data);
-
-    logger.info('User updated', { userId: id });
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: user,
-    };
-
-    return c.json(response, 200);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message, details: error.details },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Update user error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
+);
 
-// Delete user (admin only)
-router.delete('/:id', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const id = c.req.param('id');
-    userService.deleteUser(id);
+usersRouter.delete(
+  '/:id',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id;
+      userService.deleteUser(id);
 
-    logger.info('User deleted', { userId: id });
+      logger.info('User deleted', { userId: id });
 
-    const response: ApiResponse<null> = {
-      success: true,
-    };
+      const response: ApiResponse<null> = {
+        success: true,
+      };
 
-    return c.json(response, 200);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    logger.error('Delete user error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
-
-export { router as usersRouter };
+);

@@ -1,4 +1,5 @@
-import { Hono } from 'hono';
+import { Router, Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 import { productService } from '../services/product.service.js';
 import { csvImportSchema } from '../schemas/index.js';
 import { generateImportId } from '../utils/id.js';
@@ -8,136 +9,121 @@ import { authenticate, authorize, getAuthContext } from '../middleware/auth.js';
 import { UserRole } from '../types/index.js';
 import { db } from '../db/init.js';
 
-const router = new Hono();
+export const importRouter = Router();
 
-// CSV Import endpoint (admin only)
-router.post('/csv', authenticate, authorize(UserRole.ADMIN), async (c) => {
-  try {
-    const data = await c.req.formData();
-    const file = data.get('file') as File;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-    if (!file) {
-      return c.json(
-        {
+importRouter.post(
+  '/csv',
+  authenticate,
+  authorize(UserRole.ADMIN),
+  upload.single('file'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
           success: false,
           error: { message: 'File is required' },
-        } as ApiResponse<null>,
-        400,
-      );
-    }
-
-    const text = await file.text();
-    const auth = getAuthContext(c);
-
-    // Parse CSV
-    const lines = text.split('\n').filter((line) => line.trim());
-    const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
-
-    const results: any[] = [];
-    let successCount = 0;
-    let failedCount = 0;
-    const errors: string[] = [];
-
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map((v) => v.trim());
-      const row: any = {};
-
-      headers.forEach((header, index) => {
-        row[header] = values[index] || '';
-      });
-
-      // Validate row
-      const validation = csvImportSchema.safeParse({
-        sku: row.sku,
-        name: row.name,
-        description: row.description,
-        price: row.price,
-        color: row.color,
-        imageUrl: row.image_url,
-      });
-
-      if (!validation.success) {
-        failedCount++;
-        errors.push(`Row ${i + 1}: ${JSON.stringify(validation.error.flatten())}`);
-        continue;
+        } as ApiResponse<null>);
       }
 
-      // Parse data and add defaults
-      const productData = {
-        ...validation.data,
-        isActive: true,
-      };
+      const text = req.file.buffer.toString('utf-8');
+      const auth = getAuthContext(req);
 
-      try {
-        // Check if product already exists
-        const existing = productService.getProductBySku(productData.sku);
+      const lines = text.split('\n').filter((line) => line.trim());
+      const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
 
-        if (existing) {
-          // Update existing product
-          productService.updateProduct(existing.id, productData);
-        } else {
-          // Create new product
-          productService.createProduct(productData);
+      const results: any[] = [];
+      let successCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map((v) => v.trim());
+        const row: any = {};
+
+        headers.forEach((header, index) => {
+          row[header] = values[index] || '';
+        });
+
+        const validation = csvImportSchema.safeParse({
+          sku: row.sku,
+          name: row.name,
+          description: row.description,
+          price: row.price,
+          color: row.color,
+          imageUrl: row.image_url,
+        });
+
+        if (!validation.success) {
+          failedCount++;
+          errors.push(`Row ${i + 1}: ${JSON.stringify(validation.error.flatten())}`);
+          continue;
         }
 
-        successCount++;
-        results.push(productData);
-      } catch (error) {
-        failedCount++;
-        errors.push(`Row ${i + 1}: ${(error as Error).message}`);
+        const productData = {
+          ...validation.data,
+          isActive: true,
+        };
+
+        try {
+          const existing = productService.getProductBySku(productData.sku);
+
+          if (existing) {
+            productService.updateProduct(existing.id, productData);
+          } else {
+            productService.createProduct(productData);
+          }
+
+          successCount++;
+          results.push(productData);
+        } catch (error) {
+          failedCount++;
+          errors.push(`Row ${i + 1}: ${(error as Error).message}`);
+        }
       }
-    }
 
-    // Log import
-    const importId = generateImportId();
-    const now = new Date().toISOString();
+      const importId = generateImportId();
+      const now = new Date().toISOString();
 
-    db.prepare(`
-      INSERT INTO csv_imports (id, user_id, filename, total_rows, successful_rows, failed_rows, errors, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      importId,
-      auth.user.id,
-      file.name,
-      lines.length - 1,
-      successCount,
-      failedCount,
-      JSON.stringify(errors),
-      now,
-    );
-
-    logger.info('CSV import completed', {
-      importId,
-      filename: file.name,
-      successful: successCount,
-      failed: failedCount,
-      userId: auth.user.id,
-    });
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: {
+      db.prepare(`
+        INSERT INTO csv_imports (id, user_id, filename, total_rows, successful_rows, failed_rows, errors, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
         importId,
-        filename: file.name,
-        totalRows: lines.length - 1,
-        successfulRows: successCount,
-        failedRows: failedCount,
-        errors: errors.slice(0, 10), // Return first 10 errors
-        importedProducts: results,
-      },
-    };
+        auth.user.id,
+        req.file.originalname,
+        lines.length - 1,
+        successCount,
+        failedCount,
+        JSON.stringify(errors),
+        now
+      );
 
-    return c.json(response, 200);
-  } catch (error) {
-    logger.error('CSV import error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'CSV import failed', details: (error as Error).message },
-      } as ApiResponse<null>,
-      500,
-    );
+      logger.info('CSV import completed', {
+        importId,
+        filename: req.file.originalname,
+        successful: successCount,
+        failed: failedCount,
+        userId: auth.user.id,
+      });
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: {
+          importId,
+          filename: req.file.originalname,
+          totalRows: lines.length - 1,
+          successfulRows: successCount,
+          failedRows: failedCount,
+          errors: errors.slice(0, 10),
+          importedProducts: results,
+        },
+      };
+
+      return res.json(response);
+    } catch (error) {
+      next(error);
+    }
   }
-});
-
-export { router as importRouter };
+);

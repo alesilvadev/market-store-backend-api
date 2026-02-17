@@ -1,12 +1,17 @@
-import { Context } from 'hono';
+import { Request, Response, NextFunction } from 'express';
 import { ApiError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { ApiResponse } from '../types/index.js';
 
-export function errorHandler(err: Error, c: Context) {
+export function errorHandlerMiddleware(
+  err: Error,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   logger.error('Request error', err, {
-    path: c.req.path,
-    method: c.req.method,
+    path: req.path,
+    method: req.method,
   });
 
   if (err instanceof ApiError) {
@@ -21,7 +26,7 @@ export function errorHandler(err: Error, c: Context) {
       error: errorObj,
     };
 
-    return c.json(response, err.statusCode);
+    return res.status(err.statusCode).json(response);
   }
 
   const response: ApiResponse<null> = {
@@ -31,7 +36,7 @@ export function errorHandler(err: Error, c: Context) {
     },
   };
 
-  return c.json(response, 500);
+  return res.status(500).json(response);
 }
 
 export function handleValidationError(errors: any) {

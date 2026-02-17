@@ -1,66 +1,70 @@
-import { Context, Next } from 'hono';
+import { Request, Response, NextFunction } from 'express';
 import { extractTokenFromHeader, verifyToken } from '../utils/jwt.js';
 import { userService } from '../services/user.service.js';
 import { AuthContext } from '../types/index.js';
 import { AuthenticationError, AuthorizationError } from '../utils/errors.js';
 
 declare global {
-  namespace HonoRequest {
-    interface HonoRequest {
+  namespace Express {
+    interface Request {
       auth?: AuthContext;
     }
   }
 }
 
-export async function authenticate(c: Context, next: Next) {
-  const token = extractTokenFromHeader(c.req.header('Authorization'));
+export function authenticate(req: Request, res: Response, next: NextFunction) {
+  try {
+    const token = extractTokenFromHeader(req.headers.authorization);
 
-  if (!token) {
-    throw new AuthenticationError('No token provided');
+    if (!token) {
+      throw new AuthenticationError('No token provided');
+    }
+
+    const payload = verifyToken(token);
+
+    if (!payload) {
+      throw new AuthenticationError('Invalid or expired token');
+    }
+
+    const user = userService.getUserById(payload.userId);
+
+    if (!user) {
+      throw new AuthenticationError('User not found');
+    }
+
+    req.auth = {
+      user,
+      token,
+    };
+
+    next();
+  } catch (error) {
+    next(error);
   }
-
-  const payload = verifyToken(token);
-
-  if (!payload) {
-    throw new AuthenticationError('Invalid or expired token');
-  }
-
-  const user = userService.getUserById(payload.userId);
-
-  if (!user) {
-    throw new AuthenticationError('User not found');
-  }
-
-  (c as any).auth = {
-    user,
-    token,
-  };
-
-  await next();
 }
 
 export function authorize(...roles: string[]) {
-  return async (c: Context, next: Next) => {
-    const auth = (c as any).auth;
+  return (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.auth) {
+        throw new AuthenticationError('Authentication required');
+      }
 
-    if (!auth) {
-      throw new AuthenticationError('Authentication required');
+      if (!roles.includes(req.auth.user.role)) {
+        throw new AuthorizationError('Insufficient permissions');
+      }
+
+      next();
+    } catch (error) {
+      next(error);
     }
-
-    if (!roles.includes(auth.user.role)) {
-      throw new AuthorizationError('Insufficient permissions');
-    }
-
-    await next();
   };
 }
 
-export function getAuthContext(c: Context): AuthContext {
-  const auth = (c as any).auth;
-
-  if (!auth) {
+export function getAuthContext(req: Request): AuthContext {
+  if (!req.auth) {
     throw new AuthenticationError('Not authenticated');
   }
 
-  return auth;
+  return req.auth;
 }

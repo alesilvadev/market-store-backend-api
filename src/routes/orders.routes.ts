@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Router, Request, Response, NextFunction } from 'express';
 import {
   createOrderSchema,
   updateOrderStatusSchema,
@@ -11,25 +11,20 @@ import { ApiResponse } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { authenticate, getAuthContext } from '../middleware/auth.js';
 
-const router = new Hono();
+export const ordersRouter = Router();
 
-// Create order (public endpoint)
-router.post('/', async (c) => {
+ordersRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const body = await c.req.json();
-    const result = createOrderSchema.safeParse(body);
+    const result = createOrderSchema.safeParse(req.body);
 
     if (!result.success) {
-      return c.json(
-        {
-          success: false,
-          error: {
-            message: 'Validation error',
-            details: result.error.flatten(),
-          },
-        } as ApiResponse<null>,
-        400,
-      );
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Validation error',
+          details: result.error.flatten(),
+        },
+      } as ApiResponse<null>);
     }
 
     const order = orderService.createOrder(result.data);
@@ -41,44 +36,23 @@ router.post('/', async (c) => {
       data: order,
     };
 
-    return c.json(response, 201);
+    return res.status(201).json(response);
   } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message, details: error.details },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Create order error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// Get order by code (public endpoint for customer verification)
-router.get('/code/:code', async (c) => {
+ordersRouter.get('/code/:code', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const code = c.req.param('code');
+    const code = req.params.code;
 
     const order = orderService.getOrderByCode(code);
 
     if (!order) {
-      return c.json(
-        {
-          success: false,
-          error: { message: 'Order not found' },
-        } as ApiResponse<null>,
-        404,
-      );
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Order not found' },
+      } as ApiResponse<null>);
     }
 
     const response: ApiResponse<any> = {
@@ -86,34 +60,23 @@ router.get('/code/:code', async (c) => {
       data: order,
     };
 
-    return c.json(response, 200);
+    return res.json(response);
   } catch (error) {
-    logger.error('Get order by code error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// Get order by ID (authenticated)
-router.get('/:id', authenticate, async (c) => {
+ordersRouter.get('/:id', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = c.req.param('id');
+    const id = req.params.id;
 
     const order = orderService.getOrderById(id);
 
     if (!order) {
-      return c.json(
-        {
-          success: false,
-          error: { message: 'Order not found' },
-        } as ApiResponse<null>,
-        404,
-      );
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Order not found' },
+      } as ApiResponse<null>);
     }
 
     const response: ApiResponse<any> = {
@@ -121,36 +84,24 @@ router.get('/:id', authenticate, async (c) => {
       data: order,
     };
 
-    return c.json(response, 200);
+    return res.json(response);
   } catch (error) {
-    logger.error('Get order error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// List orders (authenticated)
-router.get('/', authenticate, async (c) => {
+ordersRouter.get('/', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const query = c.req.query();
-    const result = orderFilterSchema.safeParse(query);
+    const result = orderFilterSchema.safeParse(req.query);
 
     if (!result.success) {
-      return c.json(
-        {
-          success: false,
-          error: {
-            message: 'Validation error',
-            details: result.error.flatten(),
-          },
-        } as ApiResponse<null>,
-        400,
-      );
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Validation error',
+          details: result.error.flatten(),
+        },
+      } as ApiResponse<null>);
     }
 
     const { page, limit, status, startDate, endDate } = result.data;
@@ -168,129 +119,84 @@ router.get('/', authenticate, async (c) => {
       },
     };
 
-    return c.json(response, 200);
+    return res.json(response);
   } catch (error) {
-    logger.error('List orders error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// Complete order (authenticated - cashier)
-router.post('/:id/complete', authenticate, async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-    const result = completeOrderSchema.safeParse(body);
+ordersRouter.post(
+  '/:id/complete',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id;
+      const result = completeOrderSchema.safeParse(req.body);
 
-    if (!result.success) {
-      return c.json(
-        {
+      if (!result.success) {
+        return res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const auth = getAuthContext(req);
+      const { paymentMethod, notes } = result.data;
+
+      const order = orderService.completeOrder(id, paymentMethod, notes);
+
+      logger.info('Order completed', {
+        orderId: id,
+        code: order.code,
+        paymentMethod,
+        completedBy: auth.user.id,
+      });
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: order,
+      };
+
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const auth = getAuthContext(c);
-    const { paymentMethod, notes } = result.data;
-
-    const order = orderService.completeOrder(id, paymentMethod, notes);
-
-    logger.info('Order completed', {
-      orderId: id,
-      code: order.code,
-      paymentMethod,
-      completedBy: auth.user.id,
-    });
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: order,
-    };
-
-    return c.json(response, 200);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message, details: error.details },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Complete order error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
+);
 
-// Update order status (authenticated - admin)
-router.patch('/:id/status', authenticate, async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-    const result = updateOrderStatusSchema.safeParse(body);
+ordersRouter.patch(
+  '/:id/status',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id;
+      const result = updateOrderStatusSchema.safeParse(req.body);
 
-    if (!result.success) {
-      return c.json(
-        {
+      if (!result.success) {
+        return res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const order = orderService.updateOrderStatus(id, result.data);
+
+      logger.info('Order status updated', { orderId: id, status: result.data.status });
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: order,
+      };
+
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const order = orderService.updateOrderStatus(id, result.data);
-
-    logger.info('Order status updated', { orderId: id, status: result.data.status });
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: order,
-    };
-
-    return c.json(response, 200);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Update order status error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
-
-export { router as ordersRouter };
+);

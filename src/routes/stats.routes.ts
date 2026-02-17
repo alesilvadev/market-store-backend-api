@@ -1,13 +1,12 @@
-import { Hono } from 'hono';
+import { Router, Request, Response, NextFunction } from 'express';
 import { orderService } from '../services/order.service.js';
 import { ApiResponse } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { authenticate } from '../middleware/auth.js';
 
-const router = new Hono();
+export const statsRouter = Router();
 
-// Get order statistics (authenticated)
-router.get('/orders', authenticate, async (c) => {
+statsRouter.get('/orders', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = orderService.getOrderStats();
 
@@ -16,52 +15,36 @@ router.get('/orders', authenticate, async (c) => {
       data: stats,
     };
 
-    return c.json(response, 200);
+    return res.json(response);
   } catch (error) {
-    logger.error('Get order stats error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// Get top products (authenticated)
-router.get('/top-products', authenticate, async (c) => {
-  try {
-    const limit = parseInt(c.req.query('limit') || '10');
+statsRouter.get(
+  '/top-products',
+  authenticate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 10;
 
-    if (isNaN(limit) || limit < 1 || limit > 100) {
-      return c.json(
-        {
+      if (isNaN(limit) || limit < 1 || limit > 100) {
+        return res.status(400).json({
           success: false,
           error: { message: 'Invalid limit parameter' },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const products = orderService.getTopProducts(limit);
+
+      const response: ApiResponse<any> = {
+        success: true,
+        data: products,
+      };
+
+      return res.json(response);
+    } catch (error) {
+      next(error);
     }
-
-    const products = orderService.getTopProducts(limit);
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: products,
-    };
-
-    return c.json(response, 200);
-  } catch (error) {
-    logger.error('Get top products error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
-});
-
-export { router as statsRouter };
+);

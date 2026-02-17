@@ -1,31 +1,25 @@
-import { Hono } from 'hono';
+import { Router, Request, Response, NextFunction } from 'express';
 import { loginSchema, createUserSchema } from '../schemas/index.js';
 import { userService } from '../services/user.service.js';
 import { generateToken } from '../utils/jwt.js';
-import { ApiError } from '../utils/errors.js';
 import { ApiResponse } from '../types/index.js';
 import { logger } from '../utils/logger.js';
-import { authenticate, getAuthContext } from '../middleware/auth.js';
+import { authenticate, authorize, getAuthContext } from '../middleware/auth.js';
 
-const router = new Hono();
+export const authRouter = Router();
 
-// Login endpoint
-router.post('/login', async (c) => {
+authRouter.post('/login', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const body = await c.req.json();
-    const result = loginSchema.safeParse(body);
+    const result = loginSchema.safeParse(req.body);
 
     if (!result.success) {
-      return c.json(
-        {
-          success: false,
-          error: {
-            message: 'Validation error',
-            details: result.error.flatten(),
-          },
-        } as ApiResponse<null>,
-        400,
-      );
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Validation error',
+          details: result.error.flatten(),
+        },
+      } as ApiResponse<null>);
     }
 
     const { email, password } = result.data;
@@ -33,32 +27,26 @@ router.post('/login', async (c) => {
     const user = userService.getUserByEmail(email);
 
     if (!user || !user.passwordHash) {
-      return c.json(
-        {
-          success: false,
-          error: { message: 'Invalid email or password' },
-        } as ApiResponse<null>,
-        400,
-      );
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Invalid email or password' },
+      } as ApiResponse<null>);
     }
 
     const isPasswordValid = await userService.verifyUserPassword(user, password);
 
     if (!isPasswordValid) {
-      return c.json(
-        {
-          success: false,
-          error: { message: 'Invalid email or password' },
-        } as ApiResponse<null>,
-        400,
-      );
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Invalid email or password' },
+      } as ApiResponse<null>);
     }
 
     const token = generateToken(user);
 
-    logger.info('User login successful', { userId: user.id, email: user.email });
+    logger.info('User logged in', { userId: user.id, email: user.email });
 
-    const response: ApiResponse<{ user: any; token: string }> = {
+    return res.json({
       success: true,
       data: {
         user: {
@@ -69,113 +57,64 @@ router.post('/login', async (c) => {
         },
         token,
       },
-    };
-
-    return c.json(response, 200);
+    } as ApiResponse<any>);
   } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message, details: error.details },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Login error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
+    next(error);
   }
 });
 
-// Register endpoint (admin only)
-router.post('/register', async (c) => {
-  try {
-    const body = await c.req.json();
-    const result = createUserSchema.safeParse(body);
+authRouter.post(
+  '/register',
+  authenticate,
+  authorize('ADMIN'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = createUserSchema.safeParse(req.body);
 
-    if (!result.success) {
-      return c.json(
-        {
+      if (!result.success) {
+        return res.status(400).json({
           success: false,
           error: {
             message: 'Validation error',
             details: result.error.flatten(),
           },
-        } as ApiResponse<null>,
-        400,
-      );
+        } as ApiResponse<null>);
+      }
+
+      const auth = getAuthContext(req);
+      const user = userService.createUser(result.data, auth.user.id);
+
+      logger.info('User created', { userId: user.id, email: user.email, createdBy: auth.user.id });
+
+      return res.status(201).json({
+        success: true,
+        data: {
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+          },
+        },
+      } as ApiResponse<any>);
+    } catch (error) {
+      next(error);
     }
-
-    const user = await userService.createUser(result.data);
-
-    logger.info('User created', { userId: user.id, email: user.email });
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: user,
-    };
-
-    return c.json(response, 201);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message, details: error.details },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Register error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
   }
+);
+
+authRouter.get('/me', authenticate, (req: Request, res: Response) => {
+  const auth = getAuthContext(req);
+
+  return res.json({
+    success: true,
+    data: {
+      user: {
+        id: auth.user.id,
+        email: auth.user.email,
+        name: auth.user.name,
+        role: auth.user.role,
+      },
+    },
+  } as ApiResponse<any>);
 });
-
-// Get current user
-router.get('/me', authenticate, async (c) => {
-  try {
-    const auth = getAuthContext(c);
-
-    const response: ApiResponse<any> = {
-      success: true,
-      data: auth.user,
-    };
-
-    return c.json(response, 200);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      return c.json(
-        {
-          success: false,
-          error: { message: error.message },
-        } as ApiResponse<null>,
-        error.statusCode,
-      );
-    }
-
-    logger.error('Get current user error', error);
-    return c.json(
-      {
-        success: false,
-        error: { message: 'Internal server error' },
-      } as ApiResponse<null>,
-      500,
-    );
-  }
-});
-
-export { router as authRouter };
